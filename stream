@@ -1,0 +1,38 @@
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, expr
+
+# Cria uma SparkSession
+spark = SparkSession.builder \
+    .appName("RealTimeOrdersProcessing") \
+    .getOrCreate()
+
+# Configuração do stream para ler dados de Kafka
+kafka_brokers = "your_kafka_broker:9092"
+kafka_topic = "orders"
+
+df_stream = spark \
+    .readStream \
+    .format("kafka") \
+    .option("kafka.bootstrap.servers", kafka_brokers) \
+    .option("subscribe", kafka_topic) \
+    .load()
+
+# Decodifica os dados e cria um DataFrame
+df_orders = df_stream.selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)") \
+    .select(col("value").alias("json_data")) \
+    .selectExpr("json_tuple(json_data, 'order_id', 'product_id', 'quantity', 'price', 'timestamp') AS (order_id, product_id, quantity, price, timestamp)")
+
+# Realiza algumas transformações de dados
+df_transformed = df_orders.withColumn("total_value", col("quantity") * col("price"))
+
+# Define a saída para armazenar os dados processados no Data Lake
+query = df_transformed \
+    .writeStream \
+    .format("parquet") \
+    .option("path", "path_to_your_adls/orders") \
+    .option("checkpointLocation", "path_to_your_checkpoint") \
+    .outputMode("append") \
+    .start()
+
+# Aguarda a conclusão da execução
+query.awaitTermination()
